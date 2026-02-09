@@ -1,5 +1,5 @@
 // src/pages/DiagnosisView.jsx
-import React, { memo, useEffect, useMemo, useState, useCallback } from "react";
+import React, { memo, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   CheckSquare,
   Upload,
@@ -172,7 +172,8 @@ function pickBestFileByKeywords(repositoryFiles, keywords = []) {
     const isCad = name.includes(".stp") || name.includes(".step") || name.includes(".dwg") || name.includes(".dxf");
 
     if (ks.some((k) => k.includes(".xlsx") || k.includes(".csv")) && isXlsx) score += 3;
-    if (ks.some((k) => k.includes(".stp") || k.includes(".step") || k.includes(".dwg") || k.includes(".dxf")) && isCad) score += 3;
+    if (ks.some((k) => k.includes(".stp") || k.includes(".step") || k.includes(".dwg") || k.includes(".dxf")) && isCad)
+      score += 3;
 
     if (score > bestScore) {
       bestScore = score;
@@ -183,6 +184,24 @@ function pickBestFileByKeywords(repositoryFiles, keywords = []) {
   return bestScore > 0 ? best : null;
 }
 
+/** ✅ DocsView 방식: label/submit 이슈 없이 버튼으로 파일 picker 열기 */
+function FilePickButton({ itemId, onFileChange }) {
+  const inputRef = useRef(null);
+
+  return (
+    <>
+      <input ref={inputRef} type="file" className="hidden" onChange={(e) => onFileChange(e, itemId)} />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="w-full h-10 px-4 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+      >
+        <Upload size={16} className="text-gray-500" />
+        내 PC 업로드
+      </button>
+    </>
+  );
+}
 
 const DiagnosisView = memo(function DiagnosisView({
   targetCountry,
@@ -230,7 +249,6 @@ const DiagnosisView = memo(function DiagnosisView({
   const handlePickFromRepo = (file) => {
     if (!repoModalTarget) return;
 
-    // repository row가 File 객체가 아닐 수 있으니(데모) name만 유지해도 OK
     setDiagnosisFiles((prev) => ({
       ...prev,
       [repoModalTarget]: { name: file?.name ?? "selected_file", ...file },
@@ -251,26 +269,10 @@ const DiagnosisView = memo(function DiagnosisView({
 
   /** ✅ 저장소 자동 업로드: RT100 CAD/BOM 이름 기반 */
   const autoUploadFromRepo = useCallback(() => {
-    const cad = pickBestFileByKeywords(repositoryFiles, [
-      "rt100",
-      "트랙터",
-      "cad",
-      ".stp",
-      ".step",
-      ".dwg",
-      ".dxf",
-    ]);
-  
-    const bom = pickBestFileByKeywords(repositoryFiles, [
-      "rt100",
-      "트랙터",
-      "bom",
-      "부품",
-      "parts",
-      ".xlsx",
-      ".csv",
-    ]);
-  
+    const cad = pickBestFileByKeywords(repositoryFiles, ["rt100", "트랙터", "cad", ".stp", ".step", ".dwg", ".dxf"]);
+
+    const bom = pickBestFileByKeywords(repositoryFiles, ["rt100", "트랙터", "bom", "부품", "parts", ".xlsx", ".csv"]);
+
     setDiagnosisFiles((prev) => ({
       ...prev,
       ...(cad ? { upload_cad: { name: cad.name, ...cad } } : {}),
@@ -285,7 +287,6 @@ const DiagnosisView = memo(function DiagnosisView({
     const res = runMockDiagnosis(COMPLIANCE_MASTER_SCHEMA, targetCountry, diagnosisFiles);
     setResultsById(res);
 
-    // ✅ 여기서 Dashboard로 연계
     const items = buildActionItemsFromResults(COMPLIANCE_MASTER_SCHEMA, targetCountry, res);
     onPublishActionItems?.(targetCountry, items);
   }, [analysisComplete, targetCountry, diagnosisFiles, onPublishActionItems]);
@@ -298,7 +299,7 @@ const DiagnosisView = memo(function DiagnosisView({
   }, [resultsById]);
 
   return (
-    <div className="p-8 max-w-[1400px] mx-auto animate-fade-in h-full flex flex-col">
+    <div className="p-8 max-w-[1400px] mx-auto animate-fade-in min-h-full flex flex-col">
       {/* Header */}
       <div className="mb-8 flex flex-col md:flex-row justify-between items-end gap-6 px-2">
         <div>
@@ -317,6 +318,7 @@ const DiagnosisView = memo(function DiagnosisView({
             <button
               onClick={() => setChecklistOpen(true)}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black hover:bg-blue-700 shadow-sm"
+              type="button"
             >
               <Table2 size={16} /> 체크리스트(판단 기준) 보기
             </button>
@@ -324,6 +326,7 @@ const DiagnosisView = memo(function DiagnosisView({
             <button
               onClick={autoUploadFromRepo}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black hover:bg-blue-700 shadow-sm"
+              type="button"
             >
               <Wand2 size={16} /> 파일저장소 자동 업로드
             </button>
@@ -340,6 +343,7 @@ const DiagnosisView = memo(function DiagnosisView({
           {["EU", "US"].map((code) => (
             <button
               key={code}
+              type="button"
               onClick={() => {
                 setTargetCountry(code);
                 setDiagnosisFiles({});
@@ -354,18 +358,21 @@ const DiagnosisView = memo(function DiagnosisView({
             >
               {code === "EU" && "유럽"}
               {code === "US" && "미국"}
-            
             </button>
           ))}
         </div>
       </div>
 
       {/* Body */}
-      <div className={analysisComplete ? "flex flex-col gap-6" : "flex-1 flex flex-col justify-center"}>
-        {/* Upload step */}
+      <div className="flex flex-col gap-6 flex-1">
+        {/* Upload step (✅ 여기만 UI 통합) */}
         {!analysisComplete && !isAnalyzing && (
-          <div className="w-full animate-fade-in">
-            <StatusSummaryWidget total={INITIAL_UPLOADS.length} current={Object.keys(diagnosisFiles).length} label="진단용 파일" />
+          <div className="w-full animate-fade-in space-y-6">
+            <StatusSummaryWidget
+              total={INITIAL_UPLOADS.length}
+              current={Object.keys(diagnosisFiles).length}
+              label="진단용 파일"
+            />
 
             <div className="bg-white p-8 rounded-[2rem] border border-gray-200 shadow-lg flex flex-col overflow-hidden">
               <div className="text-center mb-8">
@@ -376,61 +383,85 @@ const DiagnosisView = memo(function DiagnosisView({
                 <p className="text-gray-500">규제 진단을 위해 CAD/BOM 파일을 업로드해주세요.</p>
               </div>
 
+              {/* ✅ DocsView 카드 스타일로 통일 */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 px-4">
-                {INITIAL_UPLOADS.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-5 border border-gray-100 rounded-xl bg-gray-50 hover:border-blue-200 transition-colors flex flex-col gap-3 group"
-                  >
-                    <div className="flex justify-between items-start">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1">
-                          {item.category}
-                        </span>
-                        <span className="text-base font-bold text-gray-800 leading-tight group-hover:text-blue-700">
-                          {item.name}
-                        </span>
-                        <span className="text-xs text-gray-400 mt-1">{item.desc}</span>
-                      </div>
+                {INITIAL_UPLOADS.map((item) => {
+                  const uploaded = Boolean(diagnosisFiles?.[item.id]);
 
-                      {diagnosisFiles[item.id] ? (
-                        <CheckCircle size={24} className="text-blue-500 shrink-0" />
-                      ) : (
-                        <div className="w-6 h-6 rounded-full border-2 border-gray-200 shrink-0" />
-                      )}
-                    </div>
-
-                    {diagnosisFiles[item.id] ? (
-                      <div className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                        <span className="text-xs text-gray-600 truncate flex-1 flex items-center gap-2">
-                          <FileText size={14} className="text-blue-500" />
-                          {diagnosisFiles[item.id].name}
-                        </span>
-                        <button onClick={() => removeFile(item.id)} className="text-gray-400 hover:text-red-500">
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        {/* 내 PC 업로드 */}
-                        <label className="flex-1">
-                          <input type="file" className="hidden" onChange={(e) => handleFileChange(e, item.id)} />
-                          <div className="w-full px-4 py-2 rounded-xl bg-white border border-gray-200 text-xs font-black text-gray-700 hover:bg-gray-50 text-center cursor-pointer">
-                            내 PC 업로드
+                  return (
+                    <div
+                      key={item.id}
+                      className={`p-5 border rounded-xl transition-colors flex flex-col gap-3 group ${
+                        uploaded ? "border-blue-200 bg-blue-50/10" : "border-gray-100 bg-gray-50 hover:border-blue-200"
+                      }`}
+                    >
+                      {/* 상단 */}
+                      <div className="flex items-start justify-between w-full">
+                        <div className="flex items-start gap-4 overflow-hidden">
+                          <div
+                            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors mt-1 ${
+                              uploaded ? "bg-blue-100 text-blue-600" : "bg-white text-gray-400 border border-gray-200"
+                            }`}
+                          >
+                            {uploaded ? <CheckCircle size={20} /> : <FileText size={20} />}
                           </div>
-                        </label>
 
-                        {/* ✅ 저장소 선택 */}
-                        <button
-                          onClick={() => setRepoModalTarget(item.id)}
-                          className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black hover:bg-blue-700 flex items-center gap-2"
-                        >
-                          <FolderOpen size={16} /> 저장소 선택
-                        </button>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-100">
+                                {item.category}
+                              </span>
+                            </div>
+
+                            <span className="text-base font-bold text-gray-800 leading-tight block truncate">
+                              {item.name}
+                            </span>
+                            <span className="text-xs text-gray-400 mt-1 block line-clamp-1">{item.desc}</span>
+                          </div>
+                        </div>
+
+                        {!uploaded ? (
+                          <div className="w-6 h-6 rounded-full border-2 border-gray-200 shrink-0 mt-2" />
+                        ) : (
+                          <div className="w-6 h-6 shrink-0 mt-2" />
+                        )}
                       </div>
-                    )}
-                  </div>
-                ))}
+
+                      {/* 업로드 영역 */}
+                      <div className="mt-3">
+                        {uploaded ? (
+                          <div className="h-10 flex items-center justify-between bg-white px-4 rounded-xl border border-gray-200">
+                            <span className="text-xs text-gray-600 truncate flex-1 min-w-0 flex items-center gap-2">
+                              <FileText size={14} className="text-blue-500" />
+                              {diagnosisFiles[item.id]?.name}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeFile(item.id)}
+                              className="text-gray-400 hover:text-red-500"
+                              aria-label="remove"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-3">
+                            <FilePickButton itemId={item.id} onFileChange={handleFileChange} />
+
+                            <button
+                              type="button"
+                              onClick={() => setRepoModalTarget(item.id)}
+                              className="w-full h-10 px-4 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+                            >
+                              <FolderOpen size={16} className="text-gray-500" />
+                              파일 저장소 선택
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="pt-6 border-t border-gray-100">
@@ -443,6 +474,7 @@ const DiagnosisView = memo(function DiagnosisView({
                         ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer hover:shadow-blue-200"
                         : "bg-gray-200 text-gray-400 cursor-not-allowed"
                     }`}
+                  type="button"
                 >
                   <Search size={20} /> AI 규제 진단 시작
                 </button>
@@ -458,7 +490,7 @@ const DiagnosisView = memo(function DiagnosisView({
           </div>
         )}
 
-        {/* Analyzing */}
+        {/* Analyzing (✅ 원본 그대로) */}
         {isAnalyzing && (
           <div className="max-w-xl w-full mx-auto animate-fade-in">
             <div className="h-96 bg-white rounded-[2rem] border border-gray-100 shadow-xl flex flex-col items-center justify-center p-8 relative overflow-hidden">
@@ -485,7 +517,7 @@ const DiagnosisView = memo(function DiagnosisView({
           </div>
         )}
 
-        {/* Result */}
+        {/* Result (✅ 절대 변경 없음: 원본 그대로) */}
         {analysisComplete && (
           <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm flex items-center justify-between gap-3">
             <div className="flex items-center gap-4">
@@ -501,7 +533,6 @@ const DiagnosisView = memo(function DiagnosisView({
             </div>
 
             <div className="flex items-center gap-2">
-              {/* ✅ 결과 보기(모달 열기) */}
               <button
                 onClick={() => setChecklistOpen(true)}
                 className="px-4 py-2.5 bg-blue-600 text-white rounded-xl font-black text-xs hover:bg-blue-700 flex items-center gap-2"

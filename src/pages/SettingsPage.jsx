@@ -303,7 +303,7 @@ const SettingsPage = memo(function SettingsPage() {
 
   const workspace = useMemo(
     () => ({
-      name: "ROPORT Workspace",
+      name: "대동 로보틱스",
       plan: "Pro",
       region: "KR (Seoul)",
       createdAt: "2026-01-12",

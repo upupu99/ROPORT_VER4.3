@@ -11,7 +11,7 @@ const StatusSummaryWidget = memo(function StatusSummaryWidget({
   const isComplete = missing === 0;
 
   return (
-    <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm flex items-center justify-between mb-6 animate-fade-in">
+    <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm flex items-center justify-between animate-fade-in">
       <div className="flex items-center gap-6">
         {/* Donut */}
         <div className="relative w-20 h-20">

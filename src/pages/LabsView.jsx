@@ -1,7 +1,7 @@
 // src/pages/LabsView.jsx
-import React, { memo, useMemo, useState, useCallback } from "react";
+import React, { memo, useMemo, useState, useCallback, useRef } from "react";
 import {
-  Building2,
+  FileCode,
   Upload,
   FileText,
   CheckCircle,
@@ -12,10 +12,10 @@ import {
   Wand2,
   ShieldCheck,
   Sparkles,
+  FolderOpen, // ✅ DIA 스타일 버튼 아이콘
 } from "lucide-react";
 
 import StatusSummaryWidget from "../components/StatusSummaryWidget";
-import FileUploader from "../components/FileUploader";
 import RepositoryView from "../components/RepositoryView";
 
 // ✅ mock에서 매칭 결과 데이터 가져오기
@@ -67,6 +67,7 @@ const ScoreModal = memo(function ScoreModal({ lab, onClose }) {
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-gray-100 text-gray-500"
             aria-label="close"
+            type="button"
           >
             <X size={18} />
           </button>
@@ -87,6 +88,7 @@ const ScoreModal = memo(function ScoreModal({ lab, onClose }) {
             <button
               onClick={onClose}
               className="px-4 py-2 rounded-xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700"
+              type="button"
             >
               닫기
             </button>
@@ -99,7 +101,6 @@ const ScoreModal = memo(function ScoreModal({ lab, onClose }) {
 
 /* =========================
    ✅ 파일명 기반 자동 업로드 헬퍼
-   - "프로젝트 자산"은 slotId가 없기 때문에 파일명으로 매칭해야 함
 ========================= */
 const norm = (s = "") =>
   String(s || "")
@@ -131,12 +132,7 @@ function pickBestFile(repositoryFiles, { keywords = [], exts = [] }) {
     if (allowedExts.length > 0 && !allowedExts.includes(ext)) continue;
 
     let score = 0;
-
-    for (const k of ks) {
-      if (name.includes(k)) score += 10;
-    }
-
-    // RT100 포함 시 약간 가산점(너 패턴 고정)
+    for (const k of ks) if (name.includes(k)) score += 10;
     if (name.includes("rt100")) score += 2;
 
     if (score > bestScore) {
@@ -148,11 +144,28 @@ function pickBestFile(repositoryFiles, { keywords = [], exts = [] }) {
   return bestScore > 0 ? best : null;
 }
 
+/** ✅ DocsView 방식: label/submit 이슈 없이 버튼으로 파일 picker */
+function FilePickButton({ itemId, onFileChange }) {
+  const inputRef = useRef(null);
+
+  return (
+    <>
+      <input ref={inputRef} type="file" className="hidden" onChange={(e) => onFileChange(e, itemId)} />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="w-full h-10 px-4 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+      >
+        <Upload size={16} className="text-gray-500" />
+        내 PC 업로드
+      </button>
+    </>
+  );
+}
+
 const LabsView = memo(function LabsView({
   targetCountry,
   setTargetCountry,
-
-  // ✅ App.jsx에서 내려주는 저장소 파일 목록 (프로젝트 자산)
   repositoryFiles = [],
 }) {
   const [labFiles, setLabFiles] = useState({});
@@ -176,6 +189,7 @@ const LabsView = memo(function LabsView({
   const uploadedCount = Object.keys(labFiles).length;
   const canStart = uploadedCount >= 3;
 
+  // ✅ DIA 스타일 업로드: 실제 File 객체 저장 (기존과 동일)
   const handleFileChange = (e, itemId) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -229,18 +243,8 @@ const LabsView = memo(function LabsView({
     }, 30);
   };
 
-  /* =========================
-     ✅ 핵심 수정: 자동 업로드를 파일명 기반으로!
-     - 너가 올리는 파일 예시(사진):
-       RT100 회로도,블록도.pdf
-       RT100 트랙터 BOM.xlsx
-       RT100 사용자 매뉴얼.pdf
-       RT100 제품사양서.accdb
-       자율주행 트랙터 시험성적서.pdf
-========================= */
+  // ✅ 자동 업로드(기존 로직 유지)
   const autoUploadFromRepo = useCallback(() => {
-    console.log("[Labs AutoUpload] repositoryFiles:", (repositoryFiles || []).map((x) => x?.name));
-
     const RULES = {
       lab_spec: {
         keywords: ["제품사양서", "사양서", "spec", "rt100제품사양서", "rt100"],
@@ -271,8 +275,6 @@ const LabsView = memo(function LabsView({
 
       let hit = pickBestFile(repositoryFiles, RULES[doc.id] || { keywords: [doc.name], exts: [] });
 
-      // (선택) 시험계획서 없으면 시험성적서로 대체하고 싶으면 유지
-      // 원치 않으면 아래 블록 삭제
       if (!hit && doc.id === "lab_testplan") {
         hit = pickBestFile(repositoryFiles, {
           keywords: ["시험성적서", "testreport", "성적서", "report", "자율주행트랙터", "rt100"],
@@ -280,14 +282,12 @@ const LabsView = memo(function LabsView({
         });
       }
 
-      console.log("[Labs AutoUpload] pick:", doc.id, doc.name, "=>", hit?.name);
-
       if (!hit) return;
       next[doc.id] = { name: hit.name, ...hit };
     });
 
     setLabFiles(next);
-  }, [repositoryFiles, labFiles, REQUIRED_DOCS]);
+  }, [repositoryFiles, labFiles]);
 
   const headerTitle = useMemo(() => {
     if (targetCountry === "EU") return "국내 인증기관 매칭 (EU 대응)";
@@ -296,13 +296,13 @@ const LabsView = memo(function LabsView({
   }, [targetCountry]);
 
   return (
-    <div className="p-8 pb-48 max-w-[1400px] mx-auto animate-fade-in h-full flex flex-col">
-      {/* Header */}
+    <div className="p-8 pb-28 max-w-[1400px] mx-auto animate-fade-in h-full flex flex-col">
+      {/* Header (DocsView 기준 유지: 이미 거의 동일) */}
       <div className="mb-8 flex flex-col md:flex-row justify-between items-end gap-6 px-2">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
             <span className="w-12 h-12 rounded-2xl bg-white text-blue-600 flex items-center justify-center shadow-sm border border-gray-100">
-              <Building2 size={24} />
+              <FileCode size={24} />
             </span>
             {headerTitle}
           </h1>
@@ -315,10 +315,11 @@ const LabsView = memo(function LabsView({
               <button
                 onClick={autoUploadFromRepo}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black hover:bg-blue-700 shadow-sm"
+                type="button"
               >
                 <Wand2 size={16} /> 파일저장소 자동 업로드
               </button>
-              <span className="text-[10px] font-bold text-gray-500">(프로젝트 자산 파일명 기반 자동 채움)</span>
+              
             </div>
           )}
         </div>
@@ -336,6 +337,7 @@ const LabsView = memo(function LabsView({
                   ? "bg-blue-50 text-blue-600 shadow-sm ring-1 ring-blue-100"
                   : "text-gray-400 hover:text-gray-600"
               }`}
+              type="button"
             >
               {code === "EU" && "유럽"}
               {code === "US" && "미국"}
@@ -350,7 +352,7 @@ const LabsView = memo(function LabsView({
           <StatusSummaryWidget total={REQUIRED_DOCS.length} current={uploadedCount} label="제출 서류" />
         )}
 
-        {/* Upload */}
+        {/* ✅ Upload: “버튼 누르기 이전까지”만 DocsView 업로드 카드 UI로 통합 */}
         {!matchComplete && !isMatching && (
           <div className="bg-white p-8 rounded-[2rem] border border-gray-200 shadow-lg flex flex-col overflow-hidden">
             <div className="text-center mb-8">
@@ -362,54 +364,91 @@ const LabsView = memo(function LabsView({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 px-4">
-              {REQUIRED_DOCS.map((item) => (
-                <div
-                  key={item.id}
-                  className="p-5 border border-gray-100 rounded-xl bg-gray-50 hover:border-blue-200 transition-colors flex flex-col gap-2 group"
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex flex-col">
-                      <span
-                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded w-fit mb-1 ${
-                          item.category === "필수" ? "text-red-600 bg-red-50" : "text-slate-600 bg-slate-100"
-                        }`}
-                      >
-                        {item.category}
-                      </span>
-                      <span className="text-base font-bold text-gray-800 leading-tight group-hover:text-blue-700">
-                        {item.name}
-                      </span>
-                      <span className="text-xs text-gray-400 mt-1">{item.desc}</span>
+              {REQUIRED_DOCS.map((item) => {
+                const uploaded = !!labFiles?.[item.id];
+
+                return (
+                  <div
+                    key={item.id}
+                    className={`p-5 border rounded-xl transition-colors flex flex-col gap-3 group ${
+                      uploaded ? "border-blue-200 bg-blue-50/10" : "border-gray-100 bg-gray-50 hover:border-blue-200"
+                    }`}
+                  >
+                    {/* 상단 */}
+                    <div className="flex items-start justify-between w-full">
+                      <div className="flex items-start gap-4 overflow-hidden">
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors mt-1 ${
+                            uploaded ? "bg-blue-100 text-blue-600" : "bg-white text-gray-400 border border-gray-200"
+                          }`}
+                        >
+                          {uploaded ? <CheckCircle size={20} /> : <FileText size={20} />}
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span
+                              className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                item.category === "필수"
+                                  ? "bg-red-50 text-red-700 border-red-100"
+                                  : "bg-slate-50 text-slate-700 border-slate-200"
+                              }`}
+                            >
+                              {item.category}
+                            </span>
+                          </div>
+
+                          <span className="text-base font-bold text-gray-800 leading-tight block truncate">{item.name}</span>
+                          <span className="text-xs text-gray-400 mt-1 block line-clamp-1">{item.desc}</span>
+                        </div>
+                      </div>
+
+                      {!uploaded ? (
+                        <div className="w-6 h-6 rounded-full border-2 border-gray-200 shrink-0 mt-2" />
+                      ) : (
+                        <div className="w-6 h-6 shrink-0 mt-2" />
+                      )}
                     </div>
 
-                    {labFiles[item.id] ? (
-                      <CheckCircle size={24} className="text-green-500 shrink-0" />
-                    ) : (
-                      <div className="w-6 h-6 rounded-full border-2 border-gray-200 shrink-0" />
-                    )}
+                    {/* 업로드 영역 */}
+                    <div className="mt-3">
+                      {uploaded ? (
+                        <div className="h-10 flex items-center justify-between bg-white px-4 rounded-xl border border-gray-200">
+                          <span className="text-xs text-gray-600 truncate flex-1 min-w-0 flex items-center gap-2">
+                            <FileText size={14} className="text-blue-500" />
+                            {labFiles[item.id]?.name || "uploaded_file"}
+                          </span>
+
+                          <button
+                            onClick={() => removeFile(item.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            type="button"
+                            aria-label="remove"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-3">
+                          <FilePickButton itemId={item.id} onFileChange={handleFileChange} />
+
+                          <button
+                            type="button"
+                            onClick={() => setRepoModalTarget(item.id)}
+                            className="w-full h-10 px-4 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+                          >
+                            <FolderOpen size={16} className="text-gray-500" />
+                            파일 저장소 선택
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-
-                  {labFiles[item.id] ? (
-                    <div className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 mt-2 shadow-sm">
-                      <span className="text-xs text-gray-600 truncate flex-1 flex items-center gap-2">
-                        <FileText size={14} className="text-blue-500" />
-                        {labFiles[item.id].name}
-                      </span>
-                      <button onClick={() => removeFile(item.id)} className="text-gray-400 hover:text-red-500">
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <FileUploader
-                      id={item.id}
-                      onFileSelect={handleFileChange}
-                      onRepoSelect={(id) => setRepoModalTarget(id)}
-                    />
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
 
+            {/* 하단 CTA (로직/문구 그대로) */}
             <div className="pt-6 border-t border-gray-100">
               <button
                 onClick={startMatching}
@@ -420,6 +459,7 @@ const LabsView = memo(function LabsView({
                       ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer hover:shadow-blue-200"
                       : "bg-gray-200 text-gray-400 cursor-not-allowed"
                   }`}
+                type="button"
               >
                 <Search size={20} /> 시험소 매칭 시작하기
               </button>
@@ -434,7 +474,9 @@ const LabsView = memo(function LabsView({
           </div>
         )}
 
-        {/* Analyzing */}
+        {/* ====== 아래부터는 “원본 그대로 유지” ====== */}
+
+        {/* Analyzing (원본 유지) */}
         {isMatching && (
           <div className="max-w-xl w-full mx-auto animate-fade-in">
             <div className="h-96 bg-white rounded-[2rem] border border-gray-100 shadow-xl flex flex-col items-center justify-center p-8 relative overflow-hidden">
@@ -459,7 +501,7 @@ const LabsView = memo(function LabsView({
           </div>
         )}
 
-        {/* Result */}
+        {/* Result (원본 유지) */}
         {matchComplete && (
           <div className="space-y-4">
             <div className="bg-white rounded-2xl border border-gray-200 bg-gray-50 p-5 shadow-sm flex items-center justify-between">
@@ -476,6 +518,7 @@ const LabsView = memo(function LabsView({
               <button
                 onClick={reset}
                 className="px-5 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-50 flex items-center gap-2"
+                type="button"
               >
                 <RefreshCw size={16} /> 다시 매칭하기
               </button>

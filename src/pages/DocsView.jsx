@@ -1,5 +1,5 @@
 // src/pages/DocsView.jsx
-import React, { memo, useEffect, useMemo, useState, useCallback } from "react";
+import React, { memo, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   FileCode,
   CheckCircle,
@@ -14,10 +14,12 @@ import {
   Repeat2,
   FolderUp,
   Wand2,
+  Upload,
+  FolderOpen,
+  X,
 } from "lucide-react";
 
 import StatusSummaryWidget from "../components/StatusSummaryWidget";
-import FileUploader from "../components/FileUploader";
 import RepositoryView from "../components/RepositoryView";
 import { DOC_PROCESS_CONFIG } from "../data/mock";
 
@@ -103,6 +105,25 @@ function getKeywordsForEU(reqId, reqName, reqDesc) {
   return [...base, ...(byId[reqId] || [])];
 }
 
+/** ✅ submit/label 이슈 방지용: 버튼으로 파일 picker 열기 */
+function FilePickButton({ reqId, onFileChange }) {
+  const inputRef = useRef(null);
+
+  return (
+    <>
+      <input ref={inputRef} type="file" className="hidden" onChange={(e) => onFileChange(e, reqId)} />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="w-full h-10 px-4 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+      >
+        <Upload size={16} className="text-gray-500" />
+        내 PC 업로드
+      </button>
+    </>
+  );
+}
+
 const DocsView = memo(function DocsView({
   targetCountry,
   setTargetCountry,
@@ -165,7 +186,7 @@ const DocsView = memo(function DocsView({
     }
   }, [docStep, targetCountry]);
 
-  // ✅ 내 PC 업로드
+  // ✅ 내 PC 업로드 (데모: name만 저장)
   const onFileChange = (e, reqId) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -199,8 +220,6 @@ const DocsView = memo(function DocsView({
       eu_admin_1: "eu_rep_contract",
     };
 
-    console.log("[Docs AutoUpload] repo files:", repositoryFiles);
-
     combinedInputs.forEach((req) => {
       if (uploadedFiles?.[req.id]) return;
 
@@ -213,9 +232,6 @@ const DocsView = memo(function DocsView({
       const nameHit = pickBestFile(repositoryFiles, keywords);
 
       const hit = slotHit || nameHit;
-
-      console.log("[Docs AutoUpload] req:", req.id, req.name, { slotHit, nameHit, hit });
-
       if (!hit) return;
 
       // 데모: 파일명만 업로드 처리
@@ -234,6 +250,7 @@ const DocsView = memo(function DocsView({
             </span>
             해외 제출 서류 생성
           </h1>
+
           <p className="text-gray-500 mt-2 ml-16 font-medium text-sm">
             <span className="font-bold text-blue-600">{config.label}</span> 수출 필수 서류를 AI가 작성합니다.
           </p>
@@ -242,12 +259,13 @@ const DocsView = memo(function DocsView({
           {docStep === "input" && (
             <div className="ml-16 mt-3 flex flex-wrap items-center gap-2">
               <button
+                type="button"
                 onClick={autoUploadFromRepo}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black hover:bg-blue-700 shadow-sm"
               >
                 <Wand2 size={16} /> 파일저장소 자동 업로드
               </button>
-              <span className="text-[10px] font-bold text-gray-500">(저장소 파일명/확장자 기반으로 자동 연결)</span>
+              
             </div>
           )}
         </div>
@@ -256,6 +274,7 @@ const DocsView = memo(function DocsView({
           {["EU", "US"].map((code) => (
             <button
               key={code}
+              type="button"
               onClick={() => {
                 setTargetCountry(code);
                 resetDocProcess();
@@ -273,105 +292,123 @@ const DocsView = memo(function DocsView({
         </div>
       </div>
 
-      {/* Step: INPUT */}
+      {/* Step: INPUT (Diagnosis 스타일) */}
       {docStep === "input" && (
         <div className="animate-fade-in space-y-6">
           <StatusSummaryWidget total={allRequired.length} current={uploadedIds.length} label="필수 서류" />
 
-          <div className="bg-white p-6 rounded-[2rem] border border-gray-200 shadow-sm flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-blue-50 text-blue-600">
-                  <FolderUp size={16} />
-                </div>
-                제출 서류 업로드 (All Documents)
-              </h2>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">
-                {combinedInputs.length} Items
-              </span>
+          <div className="bg-white p-8 rounded-[2rem] border border-gray-200 shadow-lg flex flex-col overflow-hidden">
+            {/* 중앙 헤더 */}
+            <div className="text-center mb-8">
+              <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FolderUp size={32} className="text-blue-600" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">제출 서류 업로드</h2>
+              <p className="text-gray-500">필수 서류를 업로드하면 AI가 기술문서(TCF/DoC) 초안을 생성합니다.</p>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              {combinedInputs.map((req) => (
-                <div
-                  key={req.id}
-                  className={`flex flex-col p-4 border rounded-2xl transition-all group ${
-                    uploadedFiles?.[req.id]
-                      ? "border-blue-200 bg-blue-50/10"
-                      : "border-gray-100 bg-white hover:border-gray-300"
-                  }`}
-                >
-                  <div className="flex items-start justify-between w-full">
-                    <div className="flex items-start gap-4 overflow-hidden">
-                      <div
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors mt-1 ${
-                          uploadedFiles?.[req.id] ? "bg-blue-100 text-blue-600" : "bg-gray-50 text-gray-400"
-                        }`}
-                      >
-                        {uploadedFiles?.[req.id] ? <CheckCircle size={20} /> : <FileText size={20} />}
-                      </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 px-4">
+              {combinedInputs.map((req) => {
+                const uploaded = Boolean(uploadedFiles?.[req.id]);
 
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span
-                            className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                              req.section === "기술"
-                                ? "bg-blue-50 text-blue-700 border-blue-100"
-                                : "bg-slate-50 text-slate-700 border-slate-200"
-                            }`}
-                          >
-                            {req.section}
-                          </span>
-                          {req.required && (
-                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-100">
-                              필수
-                            </span>
-                          )}
-                        </div>
-
-                        <span
-                          className={`text-sm font-bold block truncate ${
-                            uploadedFiles?.[req.id] ? "text-gray-900" : "text-gray-700"
+                return (
+                  <div
+                    key={req.id}
+                    className={`p-5 border rounded-xl transition-colors flex flex-col gap-3 group ${
+                      uploaded ? "border-blue-200 bg-blue-50/10" : "border-gray-100 bg-gray-50 hover:border-blue-200"
+                    }`}
+                  >
+                    {/* 상단 */}
+                    <div className="flex items-start justify-between w-full">
+                      <div className="flex items-start gap-4 overflow-hidden">
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors mt-1 ${
+                            uploaded ? "bg-blue-100 text-blue-600" : "bg-white text-gray-400 border border-gray-200"
                           }`}
                         >
-                          {req.name}
-                        </span>
-                        <span className="text-xs text-gray-400 block mt-0.5 line-clamp-1">{req.desc}</span>
+                          {uploaded ? <CheckCircle size={20} /> : <FileText size={20} />}
+                        </div>
 
-                        {uploadedFiles?.[req.id] && (
-                          <span className="text-[10px] font-bold text-blue-600 mt-1 block flex items-center gap-1">
-                            <FileCheck size={10} /> {uploadedFiles[req.id]}
-                          </span>
-                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span
+                              className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                req.section === "기술"
+                                  ? "bg-blue-50 text-blue-700 border-blue-100"
+                                  : "bg-slate-50 text-slate-700 border-slate-200"
+                              }`}
+                            >
+                              {req.section}
+                            </span>
+
+                            {req.required && (
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-100">
+                                필수
+                              </span>
+                            )}
+                          </div>
+
+                          <span className="text-base font-bold text-gray-800 leading-tight block truncate">{req.name}</span>
+                          <span className="text-xs text-gray-400 mt-1 block line-clamp-1">{req.desc}</span>
+                        </div>
                       </div>
+
+                      {!uploaded ? (
+                        <div className="w-6 h-6 rounded-full border-2 border-gray-200 shrink-0 mt-2" />
+                      ) : (
+                        <div className="w-6 h-6 shrink-0 mt-2" />
+                      )}
                     </div>
 
-                    {uploadedFiles?.[req.id] && (
-                      <button
-                        onClick={() => handleRemoveFile(req.id)}
-                        className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
+                    {/* 업로드 영역 */}
+                    <div className="mt-3">
+                      {uploaded ? (
+                        <div className="h-10 flex items-center justify-between bg-white px-4 rounded-xl border border-gray-200">
+                          <span className="text-xs text-gray-600 truncate flex-1 min-w-0 flex items-center gap-2">
+                            <FileCheck size={14} className="text-blue-500" />
+                            {uploadedFiles?.[req.id]}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveFile(req.id)}
+                            className="text-gray-400 hover:text-red-500"
+                            aria-label="remove"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-3">
+                          <FilePickButton reqId={req.id} onFileChange={onFileChange} />
 
-                  {!uploadedFiles?.[req.id] && (
-                    <FileUploader id={req.id} onFileSelect={onFileChange} onRepoSelect={(id) => setRepoModalTarget(id)} />
-                  )}
-                </div>
-              ))}
+                          <button
+                            type="button"
+                            onClick={() => setRepoModalTarget(req.id)}
+                            className="w-full h-10 px-4 rounded-xl border border-gray-200 bg-white text-xs font-black text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+                          >
+                            <FolderOpen size={16} className="text-gray-500" />
+                            파일 저장소 선택
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="mt-6 pt-6 border-t border-gray-100 flex flex-col items-center justify-center gap-3">
+            <div className="pt-6 border-t border-gray-100">
               {isAtLeastOne && !isFullyReady && (
-                <div className="flex items-center gap-2 text-amber-600 bg-amber-50 px-4 py-1.5 rounded-full text-xs font-bold border border-amber-100">
-                  <AlertTriangle size={12} />
-                  <span>필수 서류({missingDocs.length}건) 누락 → 초안(Draft)로 생성됩니다.</span>
+                <div className="mb-4 flex items-center justify-center">
+                  <div className="flex items-center gap-2 text-amber-600 bg-amber-50 px-4 py-1.5 rounded-full text-xs font-bold border border-amber-100">
+                    <AlertTriangle size={12} />
+                    <span>필수 서류({missingDocs.length}건) 누락 → 초안(Draft)로 생성됩니다.</span>
+                  </div>
                 </div>
               )}
 
               <button
+                type="button"
                 onClick={startDocGeneration}
                 disabled={!isAtLeastOne}
                 className={`w-full py-4 rounded-xl font-bold text-base shadow-lg transition-all flex items-center justify-center gap-2 transform hover:scale-[1.02]
@@ -382,7 +419,7 @@ const DocsView = memo(function DocsView({
                   }`}
               >
                 {isFullyReady ? <Zap size={20} className="animate-pulse" /> : <FilePenLine size={20} />}
-                {isFullyReady ? " 정식 기술문서 생성" : "초안 문서 생성⚠️"}
+                {isFullyReady ? "정식 기술문서 생성" : "초안 문서 생성⚠️"}
               </button>
 
               <div className="h-3" />
@@ -447,6 +484,7 @@ const DocsView = memo(function DocsView({
 
               <div className="w-full flex flex-col gap-2">
                 <button
+                  type="button"
                   onClick={resetDocProcess}
                   className="w-full text-sm text-gray-500 hover:text-blue-600 flex items-center gap-2 px-6 py-3 hover:bg-blue-50 rounded-xl transition-colors font-bold justify-center border border-gray-200 hover:border-blue-200"
                 >
@@ -454,6 +492,7 @@ const DocsView = memo(function DocsView({
                 </button>
 
                 <button
+                  type="button"
                   onClick={changeDocOnly}
                   className="w-full text-sm text-gray-700 hover:text-gray-900 flex items-center gap-2 px-6 py-3 hover:bg-gray-50 rounded-xl transition-colors font-bold justify-center border border-gray-200"
                 >
@@ -482,16 +521,14 @@ const DocsView = memo(function DocsView({
                     <span className="text-[10px] font-bold text-white bg-blue-600 px-2.5 py-1 rounded-full uppercase tracking-wide shadow-sm mb-1 inline-block">
                       {doc.type}
                     </span>
-                    <h3 className="font-bold text-gray-800 text-lg leading-snug line-clamp-2 break-words">
-                      {doc.desc}
-                    </h3>
+                    <h3 className="font-bold text-gray-800 text-lg leading-snug line-clamp-2 break-words">{doc.desc}</h3>
                     <p className="text-xs text-gray-400 mt-1 truncate">
                       {doc.name} • {doc.size}
                     </p>
                   </div>
                 </div>
 
-                {/* ✅ EU DoC 최종본만 실제 다운로드, 나머지는 비활성 */}
+                {/* ✅ EU DoC 최종본만 실제 다운로드, 나머지는 동일 UI(로직 변경 X) */}
                 {doc.file === "EU_DOC_FINAL" ? (
                   <a
                     href={DOWNLOAD_MAP[doc.file]}

@@ -44,7 +44,7 @@ function safeCountry(c) {
 const PROJECTS_STORAGE_KEY = "prototype_projects_v1";
 const CURRENT_PROJECT_ID_KEY = "prototype_current_project_id_v1";
 
-/** ✅ 프로젝트별 “프로젝트 자산” 저장 키 */
+/** ✅ 프로젝트별 “프로젝트 자산” 저장 키 (현재는 저장 기능 안 씀 - 필요시 확장용) */
 const projectAssetKey = (projectId) => `prototype_project_assets_${projectId}_v1`;
 
 export default function App() {
@@ -157,52 +157,60 @@ export default function App() {
   }, []);
 
   /* =====================================================
-     ✅ (중요) 대시보드 "프로젝트 자산" — 프로젝트별로 분리 저장
+     ✅ (중요) 대시보드 "프로젝트 자산"
+     - 초기에는 빈 배열
+     - 업로드하면 로딩 모달 → 완료 후 목록에 추가
+     - (현재) 새로고침하면 초기화됨
   ===================================================== */
   const [projectAssetFiles, setProjectAssetFiles] = useState([]);
 
-  // ✅ 현재 프로젝트 바뀌면 해당 프로젝트의 자산 로드
-  useEffect(() => {
-    if (!currentProject?.id) {
-      setProjectAssetFiles([]);
-      return;
-    }
-    try {
-      const raw = localStorage.getItem(projectAssetKey(currentProject.id));
-      const parsed = raw ? JSON.parse(raw) : [];
-      setProjectAssetFiles(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      setProjectAssetFiles([]);
-    }
-  }, [currentProject?.id]);
-
-  // ✅ 현재 프로젝트의 자산만 저장
-  useEffect(() => {
-    if (!currentProject?.id) return;
-    try {
-      localStorage.setItem(
-        projectAssetKey(currentProject.id),
-        JSON.stringify(projectAssetFiles)
-      );
-    } catch {
-      // ignore
-    }
-  }, [currentProject?.id, projectAssetFiles]);
+  // ✅ 업로드 로딩 모달 상태
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadLabel, setUploadLabel] = useState("");
 
   const uploadProjectAsset = useCallback((file) => {
     if (!file) return;
 
-    const normalized = {
-      id: `${file.name}-${file.lastModified}-${Math.random().toString(16).slice(2)}`,
-      name: file.name,
-      size: file.size ?? 0,
-      type: file.type || "",
-      lastModified: file.lastModified || Date.now(),
-      origin: "Local Upload",
-      date: new Date().toISOString().slice(0, 10),
-    };
+    // ✅ 로딩 모달 ON
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadLabel(file.name);
 
-    setProjectAssetFiles((prev) => [normalized, ...prev]);
+    // 업로드처럼 보이게 1.2~2.0초 가짜 진행
+    let p = 0;
+    const totalMs = 1200 + Math.random() * 800;
+    const tickMs = 30;
+    const step = 100 / (totalMs / tickMs);
+
+    const interval = setInterval(() => {
+      p = Math.min(99, p + step);
+      setUploadProgress(Math.floor(p));
+    }, tickMs);
+
+    setTimeout(() => {
+      clearInterval(interval);
+      setUploadProgress(100);
+
+      // ✅ 완료 시점에 목록에 추가
+      const normalized = {
+        id: `${file.name}-${file.lastModified}-${Math.random().toString(16).slice(2)}`,
+        name: file.name,
+        size: file.size ?? 0,
+        type: file.type || "",
+        lastModified: file.lastModified || Date.now(),
+        origin: "Local Upload",
+        date: new Date().toISOString().slice(0, 10),
+      };
+
+      setProjectAssetFiles((prev) => [normalized, ...prev]);
+
+      setTimeout(() => {
+        setUploading(false);
+        setUploadProgress(0);
+        setUploadLabel("");
+      }, 250);
+    }, totalMs);
   }, []);
 
   const removeProjectAsset = useCallback((fileId) => {
@@ -288,6 +296,9 @@ export default function App() {
       setDashboardRemediationByMarket({ EU: [], US: [] });
       resetDocProcess();
 
+      // ✅ 자산은 프로젝트 전환하면 초기화(원하면 제거 가능)
+      setProjectAssetFiles([]);
+
       setCurrentView("dashboard");
     },
     [resetDocProcess]
@@ -313,6 +324,9 @@ export default function App() {
           setProgress(0);
           setDashboardRemediationByMarket({ EU: [], US: [] });
           resetDocProcess();
+
+          // ✅ 자산 초기화
+          setProjectAssetFiles([]);
 
           setCurrentView("dashboard");
         }
@@ -364,6 +378,9 @@ export default function App() {
       setProgress(0);
       setDashboardRemediationByMarket({ EU: [], US: [] });
       resetDocProcess();
+
+      // ✅ 새 프로젝트는 자산도 빈 상태로 시작
+      setProjectAssetFiles([]);
 
       // ✅ 프로젝트 만든 뒤, 원래 가려던 메뉴가 있으면 이동
       if (pendingView) setCurrentView(pendingView);
@@ -559,6 +576,40 @@ export default function App() {
     </div>
   ) : null;
 
+  // ✅ 업로드 로딩 모달
+  const UploadingModal = uploading ? (
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6">
+      <div className="absolute inset-0 bg-black/45" />
+      <div className="relative w-[min(520px,92vw)] bg-white rounded-3xl border border-gray-200 shadow-2xl overflow-hidden">
+        <div className="p-6 border-b border-gray-100 bg-gray-50/60">
+          <div className="text-lg font-black text-gray-900">파일 업로드 중</div>
+          <div className="text-xs text-gray-500 mt-1 truncate">
+            {uploadLabel || "업로드 준비 중..."}
+          </div>
+        </div>
+
+        <div className="p-6">
+          <div className="w-full h-3 rounded-full bg-gray-100 overflow-hidden border border-gray-200">
+            <div
+              className="h-full bg-blue-600 transition-all duration-150"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+
+          <div className="mt-3 flex items-center justify-between text-xs text-gray-600">
+            <span className="font-bold">{uploadProgress}%</span>
+            <span className="text-gray-500">잠시만 기다려주세요</span>
+          </div>
+
+          <div className="mt-5 flex items-center gap-2">
+            <div className="w-5 h-5 rounded-full border-2 border-gray-200 border-t-blue-600 animate-spin" />
+            <div className="text-sm font-bold text-gray-800">업로드 처리 중...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="flex bg-[#f3f4f6] min-h-screen font-sans selection:bg-blue-100 text-gray-900">
       {/* 전역 스타일 */}
@@ -599,7 +650,7 @@ export default function App() {
         }}
       />
 
-      <div className="flex-1 ml-[260px]">
+      <div className="flex-1 ml-[260px] flex flex-col min-h-screen">
         {/* Header */}
         <header className="bg-white/80 backdrop-blur-xl h-20 border-b border-gray-200/50 flex items-center justify-between px-8 sticky top-0 z-40 transition-all duration-300">
           <div className="font-bold text-gray-700 text-lg flex items-center gap-2">
@@ -626,7 +677,8 @@ export default function App() {
         </header>
 
         {/* Main */}
-        <main className="animate-fade-in pb-10 custom-scrollbar">
+        <main className="flex-1 overflow-y-scroll animate-fade-in pb-10 custom-scrollbar"
+  style={{ scrollbarGutter: "stable" }}>
           {currentView === "dashboard" && (
             <DashboardView
               uploadedFiles={uploadedFiles}
@@ -715,6 +767,7 @@ export default function App() {
 
       {CreateProjectModal}
       {RequireProjectModal}
+      {UploadingModal}
     </div>
   );
 }
