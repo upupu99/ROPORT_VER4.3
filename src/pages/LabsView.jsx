@@ -17,37 +17,28 @@ import {
 
 import StatusSummaryWidget from "../components/StatusSummaryWidget";
 import RepositoryView from "../components/RepositoryView";
-
-// ✅ mock에서 매칭 결과 데이터 가져오기
 import { LABS_DATA } from "../data/mock";
 
 /* =========================
    Utils
 ========================= */
 const nvl = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
-
-// 0~1이면 %로 변환, 0~100이면 그대로
 const toPct = (v) => {
   const x = nvl(v, 0);
   return x <= 1 ? Math.round(x * 100) : Math.round(x);
 };
-
 const clampPct = (p) => Math.max(0, Math.min(100, nvl(p, 0)));
-
 const roundUp = (value, step) => {
   const v = nvl(value, 0);
   const s = Math.max(1, nvl(step, 1));
   return Math.ceil(v / s) * s;
 };
-
-// "낮을수록 좋음" 지표 정규화: value=0 -> 100%, value=max -> 0%
 const invNormalizeToPct = (value, maxValue) => {
   const v = nvl(value, 0);
   const m = Math.max(1, nvl(maxValue, 1));
   return clampPct(100 - (v / m) * 100);
 };
 
-// labs 배열에서 scoring 기반으로 게이지 상한 자동 산출
 function computeGaugeMax(labs = []) {
   const costs = [];
   const leads = [];
@@ -65,7 +56,6 @@ function computeGaugeMax(labs = []) {
 
   const COST_MANWON = Math.max(200, roundUp(maxCost * 1.15, 50));
   const LEAD_DAYS = Math.max(30, roundUp(maxLead * 1.15, 5));
-
   return { COST_MANWON, LEAD_DAYS };
 }
 
@@ -74,7 +64,6 @@ function computeGaugeMax(labs = []) {
 ========================= */
 const ScoreRow = memo(function ScoreRow({ label, display, barPct, hint }) {
   const pct = clampPct(barPct);
-
   return (
     <div className="py-3">
       <div className="flex items-center justify-between mb-1">
@@ -91,6 +80,20 @@ const ScoreRow = memo(function ScoreRow({ label, display, barPct, hint }) {
   );
 });
 
+// ✅ (추가) 비용/기간 카드 UI
+const StatCard = memo(function StatCard({ title, value }) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-white to-gray-50 px-6 py-6 shadow-sm hover:shadow-md transition-all">
+      <div className="text-xs font-bold text-gray-400 mb-2 tracking-wide">
+        {title}
+      </div>
+
+      <div className="text-xl font-black text-gray-900">
+        {value}
+      </div>
+    </div>
+  );
+});
 const ScoreModal = memo(function ScoreModal({ lab, onClose, gaugeMax }) {
   const scoring = lab?.scoring || {};
   const g = gaugeMax || { COST_MANWON: 300, LEAD_DAYS: 60 };
@@ -101,7 +104,7 @@ const ScoreModal = memo(function ScoreModal({ lab, onClose, gaugeMax }) {
   const pastSuccessPct = useMemo(() => toPct(scoring.successRate ?? 0), [scoring]); // %
   const testFieldPct = useMemo(() => toPct(scoring.testField ?? 0), [scoring]); // %
 
-  // ✅ 그래프 표시를 카드와 동일하게: costDisplay / durationDisplay 우선
+  // ✅ 카드 표시 텍스트: 카드와 동일한 표시값 우선
   const costText = useMemo(() => {
     if (lab?.costDisplay) return lab.costDisplay; // 예: "1,500만원"
     return `${Math.round(costManwon).toLocaleString()}만원`;
@@ -109,26 +112,20 @@ const ScoreModal = memo(function ScoreModal({ lab, onClose, gaugeMax }) {
 
   const durationText = useMemo(() => {
     if (lab?.durationDisplay) return lab.durationDisplay; // 예: "2.5개월"
-    // fallback: leadDays -> 개월/일
     const months = leadDays / 30;
     return months >= 1 ? `${months.toFixed(1)}개월` : `${Math.max(1, Math.round(leadDays))}일`;
   }, [lab, leadDays]);
 
-  // ✅ 게이지(정규화)
-  // 비용/리드타임: 낮을수록 유리(역방향)
-  const costBarPct = useMemo(() => invNormalizeToPct(costManwon, g.COST_MANWON), [costManwon, g]);
-  const leadBarPct = useMemo(() => invNormalizeToPct(leadDays, g.LEAD_DAYS), [leadDays, g]);
-
-  // 성공률/적합도: 높을수록 유리(정방향)
+  // ✅ 성공률/적합도만 그래프로 (이건 %라서 사용자 이해 쉬움)
   const successBarPct = useMemo(() => clampPct(pastSuccessPct), [pastSuccessPct]);
   const fieldBarPct = useMemo(() => clampPct(testFieldPct), [testFieldPct]);
 
-  // ✅ 총점(요청): 성공률/적합도 중심 가중치 + 체감 보정(군포센터 점수 올라가게)
+  // ✅ 총점(가중치 + 보정) — 기존 너가 쓰던 로직 유지
   const totalScore = useMemo(() => {
-    const costScore = invNormalizeToPct(costManwon, g.COST_MANWON); // 0~100
-    const timeScore = invNormalizeToPct(leadDays, g.LEAD_DAYS);     // 0~100
-    const successScore = clampPct(pastSuccessPct);                 // 0~100
-    const fieldScore = clampPct(testFieldPct);                     // 0~100
+    const costScore = invNormalizeToPct(costManwon, g.COST_MANWON);
+    const timeScore = invNormalizeToPct(leadDays, g.LEAD_DAYS);
+    const successScore = clampPct(pastSuccessPct);
+    const fieldScore = clampPct(testFieldPct);
 
     const weighted =
       costScore * 0.15 +
@@ -136,18 +133,17 @@ const ScoreModal = memo(function ScoreModal({ lab, onClose, gaugeMax }) {
       successScore * 0.35 +
       fieldScore * 0.35;
 
-    const boosted = weighted + 8; // 필요시 10~12로 올리면 더 높아짐
+    const boosted = weighted + 8; // 필요하면 10~12로 올리면 더 높아짐
     return Math.round(clampPct(boosted));
   }, [costManwon, leadDays, pastSuccessPct, testFieldPct, g]);
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-[min(560px,92vw)] bg-white rounded-3xl border border-gray-200 shadow-2xl overflow-hidden">
+      <div className="relative w-[min(720px,94vw)] bg-white rounded-3xl border border-gray-200 shadow-2xl overflow-hidden">
         <div className="p-6 border-b border-gray-100 bg-gray-50/60 flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-lg font-black text-gray-900 truncate">{lab?.name || "스코어링"}</div>
-            <div className="text-xs text-gray-500 mt-1"></div>
           </div>
           <button
             onClick={onClose}
@@ -160,29 +156,33 @@ const ScoreModal = memo(function ScoreModal({ lab, onClose, gaugeMax }) {
         </div>
 
         <div className="p-6">
-          {/* ✅ 인증성공확률 -> 총점 00점 */}
-          <div className="mb-4 p-4 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-between">
+          {/* ✅ 총점 */}
+          <div className="mb-5 p-4 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-between">
             <div className="text-sm font-bold text-blue-700">총점</div>
             <div className="text-2xl font-black text-blue-700">{totalScore}점</div>
           </div>
 
-          {/* ✅ 총점 밑 그래프 2개를 카드와 동일한 "예상 견적/소요 기간" */}
-          <ScoreRow label="예상 견적" hint="낮을수록 유리" display={costText} barPct={costBarPct} />
-          <ScoreRow label="소요 기간" hint="낮을수록 유리" display={durationText} barPct={leadBarPct} />
+          {/* ✅ (요청) 비용/기간은 카드 2개로만 표시 (맥스 고민 제거) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
+            <StatCard title="예상 견적" value={costText} />
+            <StatCard title="소요 기간" value={durationText} />
+          </div>
 
-          {/* 나머지 2개 유지 */}
-          <ScoreRow
-            label="과거 인증성공률"
-            hint="높을수록 유리"
-            display={`${pastSuccessPct}%`}
-            barPct={successBarPct}
-          />
-          <ScoreRow
-            label="시험분야 적합도"
-            hint="높을수록 유리"
-            display={`${testFieldPct}%`}
-            barPct={fieldBarPct}
-          />
+          {/* ✅ 성공률/적합도만 퍼센트 그래프 */}
+          <div className="mt-4">
+            <ScoreRow
+              label="과거 인증성공률"
+              hint="높을수록 유리"
+              display={`${pastSuccessPct}%`}
+              barPct={successBarPct}
+            />
+            <ScoreRow
+              label="시험분야 적합도"
+              hint="높을수록 유리"
+              display={`${testFieldPct}%`}
+              barPct={fieldBarPct}
+            />
+          </div>
 
           <div className="mt-6 flex justify-end">
             <button
@@ -244,7 +244,6 @@ function pickBestFile(repositoryFiles, { keywords = [], exts = [] }) {
   return bestScore > 0 ? best : null;
 }
 
-/** ✅ DocsView 방식: label/submit 이슈 없이 버튼으로 파일 picker */
 function FilePickButton({ itemId, onFileChange }) {
   const inputRef = useRef(null);
 
@@ -285,7 +284,6 @@ const LabsView = memo(function LabsView({ targetCountry, setTargetCountry, repos
   const uploadedCount = Object.keys(labFiles).length;
   const canStart = uploadedCount >= 3;
 
-  // ✅ 게이지 상한 자동 계산 (추천 결과 또는 LABS_DATA 기반)
   const gaugeMax = useMemo(() => {
     const base =
       Array.isArray(matchedLabs) && matchedLabs.length
@@ -341,7 +339,6 @@ const LabsView = memo(function LabsView({ targetCountry, setTargetCountry, repos
         setTimeout(() => {
           setIsMatching(false);
           setMatchComplete(true);
-
           const labs = Array.isArray(LABS_DATA) ? LABS_DATA : [];
           setMatchedLabs(labs.slice(0, 3));
         }, 300);
@@ -478,7 +475,6 @@ const LabsView = memo(function LabsView({ targetCountry, setTargetCountry, repos
                       uploaded ? "border-blue-200 bg-blue-50/10" : "border-gray-100 bg-gray-50 hover:border-blue-200"
                     }`}
                   >
-                    {/* 상단 */}
                     <div className="flex items-start justify-between w-full">
                       <div className="flex items-start gap-4 overflow-hidden">
                         <div
@@ -514,7 +510,6 @@ const LabsView = memo(function LabsView({ targetCountry, setTargetCountry, repos
                       )}
                     </div>
 
-                    {/* 업로드 영역 */}
                     <div className="mt-3">
                       {uploaded ? (
                         <div className="h-10 flex items-center justify-between bg-white px-4 rounded-xl border border-gray-200">
@@ -552,7 +547,6 @@ const LabsView = memo(function LabsView({ targetCountry, setTargetCountry, repos
               })}
             </div>
 
-            {/* 하단 CTA */}
             <div className="pt-6 border-t border-gray-100">
               <button
                 onClick={startMatching}
@@ -584,7 +578,15 @@ const LabsView = memo(function LabsView({ targetCountry, setTargetCountry, repos
             <div className="h-96 bg-white rounded-[2rem] border border-gray-100 shadow-xl flex flex-col items-center justify-center p-8 relative overflow-hidden">
               <div className="w-24 h-24 relative mb-6">
                 <svg className="animate-spin w-full h-full text-blue-100" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                  />
                   <path
                     className="opacity-100 text-blue-600"
                     fill="currentColor"
