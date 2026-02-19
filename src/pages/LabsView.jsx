@@ -12,7 +12,7 @@ import {
   Wand2,
   ShieldCheck,
   Sparkles,
-  FolderOpen, // ✅ DIA 스타일 버튼 아이콘
+  FolderOpen,
 } from "lucide-react";
 
 import StatusSummaryWidget from "../components/StatusSummaryWidget";
@@ -22,16 +22,67 @@ import RepositoryView from "../components/RepositoryView";
 import { LABS_DATA } from "../data/mock";
 
 /* =========================
-   Score Modal (내장 컴포넌트)
+   Utils
 ========================= */
-const ScoreRow = memo(function ScoreRow({ label, value }) {
-  const v = Number.isFinite(value) ? value : 0;
-  const pct = Math.max(0, Math.min(100, v));
+const nvl = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+
+// 0~1이면 %로 변환, 0~100이면 그대로
+const toPct = (v) => {
+  const x = nvl(v, 0);
+  return x <= 1 ? Math.round(x * 100) : Math.round(x);
+};
+
+const clampPct = (p) => Math.max(0, Math.min(100, nvl(p, 0)));
+
+const roundUp = (value, step) => {
+  const v = nvl(value, 0);
+  const s = Math.max(1, nvl(step, 1));
+  return Math.ceil(v / s) * s;
+};
+
+// "낮을수록 좋음" 지표 정규화: value=0 -> 100%, value=max -> 0%
+const invNormalizeToPct = (value, maxValue) => {
+  const v = nvl(value, 0);
+  const m = Math.max(1, nvl(maxValue, 1));
+  return clampPct(100 - (v / m) * 100);
+};
+
+// labs 배열에서 scoring 기반으로 게이지 상한 자동 산출
+function computeGaugeMax(labs = []) {
+  const costs = [];
+  const leads = [];
+
+  for (const lab of labs) {
+    const s = lab?.scoring || {};
+    const c = nvl(s.cost, NaN);
+    const l = nvl(s.leadTime, NaN);
+    if (Number.isFinite(c)) costs.push(c);
+    if (Number.isFinite(l)) leads.push(l);
+  }
+
+  const maxCost = costs.length ? Math.max(...costs) : 300;
+  const maxLead = leads.length ? Math.max(...leads) : 60;
+
+  const COST_MANWON = Math.max(200, roundUp(maxCost * 1.15, 50));
+  const LEAD_DAYS = Math.max(30, roundUp(maxLead * 1.15, 5));
+
+  return { COST_MANWON, LEAD_DAYS };
+}
+
+/* =========================
+   Score Modal (스코어링 보기)
+========================= */
+const ScoreRow = memo(function ScoreRow({ label, display, barPct, hint }) {
+  const pct = clampPct(barPct);
+
   return (
     <div className="py-3">
       <div className="flex items-center justify-between mb-1">
-        <div className="text-sm font-bold text-gray-700">{label}</div>
-        <div className="text-sm font-black text-gray-900">{v}점</div>
+        <div className="flex items-center gap-2">
+          <div className="text-sm font-bold text-gray-700">{label}</div>
+          {hint ? <div className="text-[11px] text-gray-400">{hint}</div> : null}
+        </div>
+        <div className="text-sm font-black text-gray-900">{display}</div>
       </div>
       <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
         <div className="h-full bg-blue-600" style={{ width: `${pct}%` }} />
@@ -40,17 +91,54 @@ const ScoreRow = memo(function ScoreRow({ label, value }) {
   );
 });
 
-const ScoreModal = memo(function ScoreModal({ lab, onClose }) {
+const ScoreModal = memo(function ScoreModal({ lab, onClose, gaugeMax }) {
   const scoring = lab?.scoring || {};
-  const total = useMemo(() => {
-    const vals = [
-      scoring.cost ?? 0,
-      scoring.leadTime ?? 0,
-      scoring.successRate ?? 0,
-      scoring.testField ?? 0,
-    ].map((n) => (Number.isFinite(n) ? n : 0));
-    return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
-  }, [scoring]);
+  const g = gaugeMax || { COST_MANWON: 300, LEAD_DAYS: 60 };
+
+  // 값 추출
+  const costManwon = useMemo(() => nvl(scoring.cost ?? 0), [scoring]); // 만원
+  const leadDays = useMemo(() => nvl(scoring.leadTime ?? 0), [scoring]); // 일
+  const pastSuccessPct = useMemo(() => toPct(scoring.successRate ?? 0), [scoring]); // %
+  const testFieldPct = useMemo(() => toPct(scoring.testField ?? 0), [scoring]); // %
+
+  // ✅ 그래프 표시를 카드와 동일하게: costDisplay / durationDisplay 우선
+  const costText = useMemo(() => {
+    if (lab?.costDisplay) return lab.costDisplay; // 예: "1,500만원"
+    return `${Math.round(costManwon).toLocaleString()}만원`;
+  }, [lab, costManwon]);
+
+  const durationText = useMemo(() => {
+    if (lab?.durationDisplay) return lab.durationDisplay; // 예: "2.5개월"
+    // fallback: leadDays -> 개월/일
+    const months = leadDays / 30;
+    return months >= 1 ? `${months.toFixed(1)}개월` : `${Math.max(1, Math.round(leadDays))}일`;
+  }, [lab, leadDays]);
+
+  // ✅ 게이지(정규화)
+  // 비용/리드타임: 낮을수록 유리(역방향)
+  const costBarPct = useMemo(() => invNormalizeToPct(costManwon, g.COST_MANWON), [costManwon, g]);
+  const leadBarPct = useMemo(() => invNormalizeToPct(leadDays, g.LEAD_DAYS), [leadDays, g]);
+
+  // 성공률/적합도: 높을수록 유리(정방향)
+  const successBarPct = useMemo(() => clampPct(pastSuccessPct), [pastSuccessPct]);
+  const fieldBarPct = useMemo(() => clampPct(testFieldPct), [testFieldPct]);
+
+  // ✅ 총점(요청): 성공률/적합도 중심 가중치 + 체감 보정(군포센터 점수 올라가게)
+  const totalScore = useMemo(() => {
+    const costScore = invNormalizeToPct(costManwon, g.COST_MANWON); // 0~100
+    const timeScore = invNormalizeToPct(leadDays, g.LEAD_DAYS);     // 0~100
+    const successScore = clampPct(pastSuccessPct);                 // 0~100
+    const fieldScore = clampPct(testFieldPct);                     // 0~100
+
+    const weighted =
+      costScore * 0.15 +
+      timeScore * 0.15 +
+      successScore * 0.35 +
+      fieldScore * 0.35;
+
+    const boosted = weighted + 8; // 필요시 10~12로 올리면 더 높아짐
+    return Math.round(clampPct(boosted));
+  }, [costManwon, leadDays, pastSuccessPct, testFieldPct, g]);
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
@@ -59,9 +147,7 @@ const ScoreModal = memo(function ScoreModal({ lab, onClose }) {
         <div className="p-6 border-b border-gray-100 bg-gray-50/60 flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-lg font-black text-gray-900 truncate">{lab?.name || "스코어링"}</div>
-            <div className="text-xs text-gray-500 mt-1">
-              비용 / 리드타임 / 과거 인증성공률 / 시험분야 적합도
-            </div>
+            <div className="text-xs text-gray-500 mt-1"></div>
           </div>
           <button
             onClick={onClose}
@@ -74,15 +160,29 @@ const ScoreModal = memo(function ScoreModal({ lab, onClose }) {
         </div>
 
         <div className="p-6">
+          {/* ✅ 인증성공확률 -> 총점 00점 */}
           <div className="mb-4 p-4 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-between">
-            <div className="text-sm font-bold text-blue-700">총점(평균)</div>
-            <div className="text-2xl font-black text-blue-700">{total}점</div>
+            <div className="text-sm font-bold text-blue-700">총점</div>
+            <div className="text-2xl font-black text-blue-700">{totalScore}점</div>
           </div>
 
-          <ScoreRow label="비용" value={scoring.cost} />
-          <ScoreRow label="리드타임" value={scoring.leadTime} />
-          <ScoreRow label="과거 인증성공률" value={scoring.successRate} />
-          <ScoreRow label="시험분야 적합도" value={scoring.testField} />
+          {/* ✅ 총점 밑 그래프 2개를 카드와 동일한 "예상 견적/소요 기간" */}
+          <ScoreRow label="예상 견적" hint="낮을수록 유리" display={costText} barPct={costBarPct} />
+          <ScoreRow label="소요 기간" hint="낮을수록 유리" display={durationText} barPct={leadBarPct} />
+
+          {/* 나머지 2개 유지 */}
+          <ScoreRow
+            label="과거 인증성공률"
+            hint="높을수록 유리"
+            display={`${pastSuccessPct}%`}
+            barPct={successBarPct}
+          />
+          <ScoreRow
+            label="시험분야 적합도"
+            hint="높을수록 유리"
+            display={`${testFieldPct}%`}
+            barPct={fieldBarPct}
+          />
 
           <div className="mt-6 flex justify-end">
             <button
@@ -163,11 +263,7 @@ function FilePickButton({ itemId, onFileChange }) {
   );
 }
 
-const LabsView = memo(function LabsView({
-  targetCountry,
-  setTargetCountry,
-  repositoryFiles = [],
-}) {
+const LabsView = memo(function LabsView({ targetCountry, setTargetCountry, repositoryFiles = [] }) {
   const [labFiles, setLabFiles] = useState({});
   const [repoModalTarget, setRepoModalTarget] = useState(null);
 
@@ -189,7 +285,17 @@ const LabsView = memo(function LabsView({
   const uploadedCount = Object.keys(labFiles).length;
   const canStart = uploadedCount >= 3;
 
-  // ✅ DIA 스타일 업로드: 실제 File 객체 저장 (기존과 동일)
+  // ✅ 게이지 상한 자동 계산 (추천 결과 또는 LABS_DATA 기반)
+  const gaugeMax = useMemo(() => {
+    const base =
+      Array.isArray(matchedLabs) && matchedLabs.length
+        ? matchedLabs
+        : Array.isArray(LABS_DATA)
+          ? LABS_DATA
+          : [];
+    return computeGaugeMax(base);
+  }, [matchedLabs]);
+
   const handleFileChange = (e, itemId) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -243,12 +349,11 @@ const LabsView = memo(function LabsView({
     }, 30);
   };
 
-  // ✅ 자동 업로드(기존 로직 유지)
   const autoUploadFromRepo = useCallback(() => {
     const RULES = {
       lab_spec: {
         keywords: ["제품사양서", "사양서", "spec", "rt100제품사양서", "rt100"],
-        exts: ["pdf", "rtf", "accdb", "doc", "docx"],
+        exts: ["pdf", "rtf", "doc", "docx"],
       },
       lab_manual: {
         keywords: ["사용자매뉴얼", "매뉴얼", "manual", "rt100사용자매뉴얼", "rt100"],
@@ -297,7 +402,7 @@ const LabsView = memo(function LabsView({
 
   return (
     <div className="p-8 pb-28 max-w-[1400px] mx-auto animate-fade-in h-full flex flex-col">
-      {/* Header (DocsView 기준 유지: 이미 거의 동일) */}
+      {/* Header */}
       <div className="mb-8 flex flex-col md:flex-row justify-between items-end gap-6 px-2">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
@@ -319,7 +424,6 @@ const LabsView = memo(function LabsView({
               >
                 <Wand2 size={16} /> 파일저장소 자동 업로드
               </button>
-              
             </div>
           )}
         </div>
@@ -352,7 +456,7 @@ const LabsView = memo(function LabsView({
           <StatusSummaryWidget total={REQUIRED_DOCS.length} current={uploadedCount} label="제출 서류" />
         )}
 
-        {/* ✅ Upload: “버튼 누르기 이전까지”만 DocsView 업로드 카드 UI로 통합 */}
+        {/* Upload Card */}
         {!matchComplete && !isMatching && (
           <div className="bg-white p-8 rounded-[2rem] border border-gray-200 shadow-lg flex flex-col overflow-hidden">
             <div className="text-center mb-8">
@@ -448,7 +552,7 @@ const LabsView = memo(function LabsView({
               })}
             </div>
 
-            {/* 하단 CTA (로직/문구 그대로) */}
+            {/* 하단 CTA */}
             <div className="pt-6 border-t border-gray-100">
               <button
                 onClick={startMatching}
@@ -474,9 +578,7 @@ const LabsView = memo(function LabsView({
           </div>
         )}
 
-        {/* ====== 아래부터는 “원본 그대로 유지” ====== */}
-
-        {/* Analyzing (원본 유지) */}
+        {/* Analyzing */}
         {isMatching && (
           <div className="max-w-xl w-full mx-auto animate-fade-in">
             <div className="h-96 bg-white rounded-[2rem] border border-gray-100 shadow-xl flex flex-col items-center justify-center p-8 relative overflow-hidden">
@@ -501,7 +603,7 @@ const LabsView = memo(function LabsView({
           </div>
         )}
 
-        {/* Result (원본 유지) */}
+        {/* Result */}
         {matchComplete && (
           <div className="space-y-4">
             <div className="bg-white rounded-2xl border border-gray-200 bg-gray-50 p-5 shadow-sm flex items-center justify-between">
@@ -658,7 +760,7 @@ const LabsView = memo(function LabsView({
       )}
 
       {/* ✅ 스코어링 모달 */}
-      {scoreTarget && <ScoreModal lab={scoreTarget} onClose={() => setScoreTarget(null)} />}
+      {scoreTarget && <ScoreModal lab={scoreTarget} gaugeMax={gaugeMax} onClose={() => setScoreTarget(null)} />}
     </div>
   );
 });
